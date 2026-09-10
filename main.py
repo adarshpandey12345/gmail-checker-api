@@ -1,42 +1,56 @@
 from flask import Flask, request, jsonify
 import requests
-import json
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({"status": "active"})
+    return jsonify({"status": "active", "service": "Automated Gmail Verification API"})
 
 @app.route('/verify', methods=['GET'])
 def verify_gmail():
     email = request.args.get('email', '').strip().lower()
+
     if not email or not email.endswith('@gmail.com'):
-        return jsonify({"valid": False, "reason": "Invalid email"}), 400
+        return jsonify({"valid": False, "reason": "Invalid email format. Must end with @gmail.com"}), 400
+
+    username = email.replace('@gmail.com', '')
+    if len(username) < 6 or len(username) > 30:
+        return jsonify({"valid": False, "reason": "Gmail username must be between 6 and 30 characters"}), 200
 
     try:
-        session = requests.Session()
-        url = "https://accounts.google.com/_/common/account/lookup"
+        # Public deliverability verification gateway
+        api_url = f"https://api.eva.pingutil.com/email?email={email}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "Origin": "https://accounts.google.com",
-            "Referer": "https://accounts.google.com/signin/v2/identifier",
-            "X-Same-Domain": "1"
-        }
-        data = {
-            "f.req": json.dumps([email, "identifiertoken", True, True])
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-        resp = session.post(url, data=data, headers=headers, timeout=10)
-        
-        return jsonify({
-            "status_code": resp.status_code,
-            "raw_response": resp.text[:500]
-        })
+        resp = requests.get(api_url, headers=headers, timeout=12)
+
+        if resp.status_code == 200:
+            data = resp.json().get("data", {})
+            deliverable = data.get("deliverable", False)
+            gibberish = data.get("gibberish", False)
+
+            if deliverable and not gibberish:
+                return jsonify({
+                    "valid": True,
+                    "email": email,
+                    "status": "Account verified"
+                })
+            else:
+                return jsonify({
+                    "valid": False,
+                    "email": email,
+                    "reason": "Account does not exist on mail servers"
+                })
+
+        # Fallback check
+        return jsonify({"valid": False, "email": email, "reason": "Verification service unavailable"}), 502
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"valid": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-    
+            
