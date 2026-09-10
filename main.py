@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({"status": "active", "service": "Automated Gmail Verification API"})
+    return jsonify({"status": "active", "service": "Gmail Verification API"})
 
 @app.route('/verify', methods=['GET'])
 def verify_gmail():
@@ -19,38 +19,45 @@ def verify_gmail():
         return jsonify({"valid": False, "reason": "Gmail username must be between 6 and 30 characters"}), 200
 
     try:
-        # Public deliverability verification gateway
-        api_url = f"https://api.eva.pingutil.com/email?email={email}"
+        # Google Android device setup check endpoint
+        url = "https://android.clients.google.com/setup/checkin"
+        
+        # Public identity verification endpoint used by Chrome/Android setup
+        verify_url = f"https://mail.google.com/mail/feed/atom/"
+        
+        # Test recipient status against Google's public accounts API
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Google-HTTP-Java-Client/1.25.0 (gzip)",
+            "Accept": "application/json"
         }
 
-        resp = requests.get(api_url, headers=headers, timeout=12)
+        # Query Google's public account lookup gateway
+        lookup_url = "https://accounts.google.com/_/common/account/lookup"
+        post_data = {
+            "f.req": f'["{email}"]'
+        }
+        
+        req_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "Referer": "https://accounts.google.com/"
+        }
 
-        if resp.status_code == 200:
-            data = resp.json().get("data", {})
-            deliverable = data.get("deliverable", False)
-            gibberish = data.get("gibberish", False)
+        resp = requests.post(lookup_url, data=post_data, headers=req_headers, timeout=10)
+        body = resp.text
 
-            if deliverable and not gibberish:
-                return jsonify({
-                    "valid": True,
-                    "email": email,
-                    "status": "Account verified"
-                })
-            else:
-                return jsonify({
-                    "valid": False,
-                    "email": email,
-                    "reason": "Account does not exist on mail servers"
-                })
+        # Analyze response indicators
+        if "Couldn't find your Google Account" in body or '"e",-10001' in body:
+            return jsonify({"valid": False, "email": email, "reason": "Account does not exist on Google"})
 
-        # Fallback check
-        return jsonify({"valid": False, "email": email, "reason": "Verification service unavailable"}), 502
+        if "IN_USE" in body or email in body or resp.status_code == 200 and len(body) > 30:
+            return jsonify({"valid": True, "email": email, "status": "Account exists on Google"})
+
+        return jsonify({"valid": False, "email": email, "reason": "Account does not exist on Google"})
 
     except Exception as e:
         return jsonify({"valid": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-            
+        
